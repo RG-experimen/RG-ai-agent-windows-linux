@@ -178,5 +178,32 @@ if action in {"read_file", "write_file"}:
     for alt in ("file", "filename", "file_path", "target"):
         if alt in params and "path" not in params:
             params["path"] = params.pop(alt)`
+  },
+  {
+    id: 'compound-open-notepad-missing-app',
+    title: 'Compound Action "Open Notepad" Missing "app" & Prompt Erasure',
+    severity: 'critical',
+    category: 'Robustness',
+    symptom: 'When user types "buka notepad, ketik halo dunia", agent fails with `Parameter \'app\' diperlukan untuk action \'open\'` and aborts after 3 recovery retries.',
+    rootCause: 'Two-fold issue: 1) The model generated a compound action without the explicit `app` key (or used target/program/string format, or outputted `text` directly). 2) During format recovery, `current_prompt` erased the original user query ("buka notepad, ketik halo dunia") and only sent the error message, leaving the model with no context of what app to open!',
+    fixExplanation: '1) Added 4-tier auto-healing in `validate_action` that automatically resolves the app name from string parameters, keys, values, and original user context (auto-populating `app = "notepad"`). 2) Retained the original user instruction in `current_prompt` during recovery along with clear schema hints.',
+    originalSnippet: `# Original recovery loop in run_turn:
+except ValueError as exc:
+    # BUG: Overwrites current_prompt, losing the original user request!
+    current_prompt = f"Respons Anda sebelumnya bukan JSON valid: {exc}\\n..."
+    # Model loses knowledge of "buka notepad" and fails 3x!`,
+    fixedSnippet: `# Fixed v2.0 code in run_turn & validate_action:
+# 1. validate_action auto-heals app from user_context:
+if ("app" not in params or not params["app"]) and user_context:
+    for known in ("notepad", "code", "chrome", "cmd", "calc", ...):
+        if known in user_context.lower():
+            params["app"] = known; break
+
+# 2. run_turn retains original user instruction during retry:
+current_prompt = (
+    f"Instruksi asli pengguna: \\"{user_input}\\"\\n\\n"
+    f"Format JSON sebelumnya GAGAL: {exc}\\n"
+    f"Contoh format benar: {\\"action\\": \\"open\\", \\"parameters\\": {\\"app\\": \\"notepad\\"}}"
+)`
   }
 ];

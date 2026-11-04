@@ -234,12 +234,19 @@ Actions:
 - run_command:{"command": str}
 
 Rules:
-1. When generating code in VS Code: ALWAYS write the file first via write_file,
+1. MANDATORY MULTI-STEP RULE:
+   If the user asks for multiple steps (e.g. 'buka notepad, ketik halo dunia' or 'buka VS Code dan buat file'):
+   - DO NOT try to type or write before the application is opened!
+   - Execute Step 1 FIRST: {"action": "open", "parameters": {"app": "notepad"}}
+   - The environment will respond that the app was opened.
+   - Then in the NEXT turn, execute Step 2: {"action": "keyboard", "parameters": {"action": "write", "text": "halo dunia"}}
+2. For action 'open': The 'app' parameter is MANDATORY: {"action": "open", "parameters": {"app": "notepad"}}.
+3. For action 'keyboard': 'action' is MANDATORY ("write", "press", "hotkey", or "paste"):
+   - For writing text: {"action": "keyboard", "parameters": {"action": "write", "text": "..."}}
+   - For hotkeys: {"action": "keyboard", "parameters": {"action": "hotkey", "keys": ["ctrl", "v"]}}
+4. When writing large code into VS Code: ALWAYS write the file first via write_file,
    then use open {"app": "code", "args": "path"} for reliable execution.
-2. If the user asks to see typing in an editor, open the app, then use paste (Ctrl+V)
-   rather than slow character-by-character typing.
-3. Call screenshot before interacting if you need current screen coordinates.
-4. Return ONLY the JSON object, no Markdown code fences.
+5. Return ONLY the JSON object, no Markdown code fences, no surrounding text.
 """
 
 MODE_PROMPTS = {
@@ -273,7 +280,7 @@ def make_action_schema(mode: str) -> Dict[str, Any]:
 def parse_ai_response(text: str) -> Dict[str, Any]:
     """
     Robustly parses the model's response into a JSON dictionary.
-    Handles raw JSON, Markdown code fences, preambles, and extracts outermost objects.
+    Handles raw JSON, lists of actions, Markdown code fences, preambles, and extracts outermost objects.
     """
     if not isinstance(text, str):
         raise ValueError("AI response is not text.")
@@ -281,40 +288,56 @@ def parse_ai_response(text: str) -> Dict[str, Any]:
     if not clean:
         raise ValueError("Respons AI kosong.")
 
+    def _normalize_obj(obj: Any) -> Optional[Dict[str, Any]]:
+        if isinstance(obj, list) and len(obj) > 0:
+            for item in obj:
+                if isinstance(item, dict) and "action" in item:
+                    return item
+            if isinstance(obj[0], dict):
+                return obj[0]
+        elif isinstance(obj, dict):
+            if "actions" in obj and isinstance(obj["actions"], list) and len(obj["actions"]) > 0:
+                return _normalize_obj(obj["actions"])
+            if "action" in obj:
+                return obj
+            for v in obj.values():
+                if isinstance(v, dict) and "action" in v:
+                    return v
+            return obj
+        return None
+
     # 1. Direct JSON parse
     try:
-        obj = json.loads(clean)
-        if isinstance(obj, dict):
-            return obj
+        parsed = json.loads(clean)
+        norm = _normalize_obj(parsed)
+        if norm is not None:
+            return norm
     except json.JSONDecodeError:
         pass
 
-    # 2. Strip markdown fences if present
+    # 2. Extract from markdown code fences
     fence_pattern = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.IGNORECASE)
-    fenced_match = fence_pattern.search(clean)
-    if fenced_match:
+    for fenced_match in fence_pattern.finditer(clean):
         extracted = fenced_match.group(1).strip()
         try:
-            obj = json.loads(extracted)
-            if isinstance(obj, dict):
-                return obj
+            parsed = json.loads(extracted)
+            norm = _normalize_obj(parsed)
+            if norm is not None:
+                return norm
         except json.JSONDecodeError:
             pass
 
     # 3. Find outermost balanced curly braces containing "action"
-    start = -1
-    for i, ch in enumerate(clean):
-        if ch == "{":
-            start = i
-            break
-
+    start = clean.find("{")
     if start == -1:
         raise ValueError("Respons AI tidak mengandung JSON object.")
 
     depth = 0
     in_str = False
     esc = False
-    for i in range(start, len(clean)):
+    candidate_start = -1
+
+    for i in range(len(clean)):
         ch = clean[i]
         if esc:
             esc = False
@@ -328,18 +351,30 @@ def parse_ai_response(text: str) -> Dict[str, Any]:
         if ch == '"':
             in_str = True
         elif ch == "{":
+            if depth == 0:
+                candidate_start = i
             depth += 1
         elif ch == "}":
             depth -= 1
-            if depth == 0:
-                candidate = clean[start:i + 1]
+            if depth == 0 and candidate_start != -1:
+                candidate = clean[candidate_start:i + 1]
                 try:
-                    obj = json.loads(candidate)
-                    if isinstance(obj, dict):
-                        return obj
+                    parsed = json.loads(candidate)
+                    norm = _normalize_obj(parsed)
+                    if norm is not None and "action" in norm:
+                        return norm
                 except json.JSONDecodeError:
-                    # Continue searching if this wasn't the target outer JSON
                     pass
+
+    # Fallback regex search for action JSON
+    action_match = re.search(r'\{[^{}]*"action"\s*:\s*"[^"]+"[^{}]*\}', clean)
+    if action_match:
+        try:
+            parsed = json.loads(action_match.group(0))
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
 
     raise ValueError("JSON object tidak valid atau tidak tertutup dengan benar.")
 
@@ -1231,38 +1266,106 @@ def run_command(command: str, base: Path, mode: str = "coding") -> Dict[str, Any
 
 
 # ---------- Action Normalization & Dispatch ----------
-def validate_action(payload: Any, mode: str = "coding") -> Tuple[str, Dict[str, Any]]:
+def validate_action(payload: Any, mode: str = "coding", user_context: str = "") -> Tuple[str, Dict[str, Any]]:
     if not isinstance(payload, dict):
         raise ValueError("Payload bukan objek JSON.")
 
     action = payload.get("action")
     params = payload.get("parameters")
 
+    # If action is None, check if payload itself has known action names
+    if not action:
+        for possible_act in ACTIONS_BY_MODE.get(mode, []):
+            if possible_act in payload:
+                action = possible_act
+                params = payload[possible_act]
+                break
+
     allowed = set(ACTIONS_BY_MODE.get(mode, ACTIONS_BY_MODE["coding"]))
     if action not in allowed:
         raise ValueError(f"Action '{action}' tidak dikenal untuk mode {mode}. Diizinkan: {sorted(allowed)}")
 
-    if not isinstance(params, dict):
-        raise ValueError("Parameter bukan JSON object.")
+    # Parameter type normalization: string to dict
+    if params is None:
+        params = {}
+    elif isinstance(params, str):
+        if action == "open":
+            params = {"app": params}
+        elif action == "chat":
+            params = {"message": params}
+        elif action == "run_command":
+            params = {"command": params}
+        elif action in {"read_file", "write_file"}:
+            params = {"path": params}
+        else:
+            params = {"action": params}
+    elif not isinstance(params, dict):
+        params = {}
 
-    # Parameter normalization & aliases
+    # === ROBUST PARAMETER AUTO-HEALING & ALIASES ===
     if action == "open":
-        for alt in ("app_name", "application", "program", "name"):
+        # 1. Aliases for 'app'
+        for alt in ("app_name", "application", "program", "name", "target", "exe",
+                    "executable", "command", "cmd", "file", "filename", "path",
+                    "process", "software", "title", "window", "tool", "app_to_open"):
             if alt in params and "app" not in params:
                 params["app"] = params.pop(alt)
 
-    if action == "keyboard":
+        # 2. Check if any key in params is a known app name
+        if "app" not in params or not params["app"]:
+            for k in list(params.keys()):
+                k_lower = k.lower().strip()
+                if k_lower in _WIN_APP_MAP:
+                    params["app"] = k_lower
+                    break
+
+        # 3. Check if any string value in params contains a known app name
+        if "app" not in params or not params["app"]:
+            for v in list(params.values()):
+                if isinstance(v, str):
+                    v_lower = v.lower()
+                    for known in _WIN_APP_MAP:
+                        if known in v_lower:
+                            params["app"] = known
+                            break
+                    if "app" in params and params["app"]:
+                        break
+
+        # 4. Context fallback: extract app name from user's original instruction!
+        if ("app" not in params or not params["app"]) and user_context:
+            ctx_lower = user_context.lower()
+            for known in ("notepad", "code", "vscode", "vs code", "chrome", "edge", "cmd", "powershell", "calc", "explorer", "paint", "terminal", "firefox"):
+                if known in ctx_lower:
+                    params["app"] = _WIN_APP_MAP.get(known, known)
+                    break
+
+    elif action == "keyboard":
+        # Default action to 'write' or 'press' if missing
+        if "action" not in params:
+            if "text" in params:
+                params["action"] = "write"
+            elif "keys" in params or "key" in params:
+                params["action"] = "press"
+            else:
+                params["action"] = "write"
         if "key" in params and "keys" not in params:
             params["keys"] = params.pop("key")
+        if "keys" in params and isinstance(params["keys"], str):
+            params["keys"] = [params["keys"]]
 
-    if action in {"read_file", "write_file"}:
+    elif action == "window":
+        if "action" not in params:
+            params["action"] = "activate"
+
+    elif action in {"read_file", "write_file"}:
         for alt in ("file", "filename", "file_path", "target"):
             if alt in params and "path" not in params:
                 params["path"] = params.pop(alt)
 
-    if action == "run_command":
-        if "cmd" in params and "command" not in params:
-            params["command"] = params.pop("cmd")
+    elif action == "run_command":
+        for alt in ("cmd", "shell", "exec", "script"):
+            if alt in params and "command" not in params:
+                params["command"] = params.pop(alt)
 
     required = {
         "chat": ("message",),
@@ -1278,7 +1381,7 @@ def validate_action(payload: Any, mode: str = "coding") -> Tuple[str, Dict[str, 
     }
 
     for f in required.get(action, ()):
-        if f not in params:
+        if f not in params or not params[f]:
             raise ValueError(f"Parameter '{f}' diperlukan untuk action '{action}'.")
         if not isinstance(params[f], str):
             if isinstance(params[f], (int, float, bool)):
@@ -1350,7 +1453,7 @@ def run_turn(llm: BaseLLMClient, user_input: str, base: Path, mode: str,
 
                 # Conversational fallback: if no JSON structure at all, treat as friendly chat
                 try:
-                    action, params = validate_action(parse_ai_response(raw_response), mode=mode)
+                    action, params = validate_action(parse_ai_response(raw_response), mode=mode, user_context=user_input)
                     break
                 except ValueError as parse_err:
                     if "{" not in raw_response and not raw_response.strip().startswith("```"):
@@ -1364,11 +1467,23 @@ def run_turn(llm: BaseLLMClient, user_input: str, base: Path, mode: str,
                     on_chat(f"[Gagal parsing respons AI setelah 3 percobaan: {exc}]")
                     return
                 on_info(f"[Format Recovery] Meminta AI memperbaiki format JSON ({exc})...")
+
+                schema_hint = 'Contoh JSON benar: {"action": "open", "parameters": {"app": "notepad"}}'
+                exc_str = str(exc).lower()
+                if "keyboard" in exc_str or "text" in exc_str:
+                    schema_hint = 'Contoh JSON benar: {"action": "keyboard", "parameters": {"action": "write", "text": "halo dunia"}}'
+                elif "window" in exc_str:
+                    schema_hint = 'Contoh JSON benar: {"action": "window", "parameters": {"action": "activate", "title": "Notepad"}}'
+                elif "command" in exc_str:
+                    schema_hint = 'Contoh JSON benar: {"action": "run_command", "parameters": {"command": "git status"}}'
+
                 current_prompt = (
-                    f"Respons Anda sebelumnya bukan JSON valid: {exc}\n"
-                    f"Kembalikan HANYA SATU JSON object valid dengan format:\n"
-                    f'{{"action": "<nama_action>", "parameters": {{ ... }}}}\n'
-                    f"Dilarang menggunakan Markdown code fences atau teks pembuka."
+                    f"Instruksi asli pengguna: \"{user_input}\"\n\n"
+                    f"Format JSON sebelumnya GAGAL divalidasi: {exc}\n"
+                    f"{schema_hint}\n"
+                    f"PENTING: Lakukan HANYA SATU action per turn. Jika tugas butuh dua langkah "
+                    f"(misal: buka notepad lalu ketik teks), lakukan langkah pertama dulu (buka notepad saja). "
+                    f"Kembalikan HANYA SATU JSON object valid tanpa Markdown code fences atau teks pembuka."
                 )
             except Exception as exc:
                 on_chat(f"[Error Provider] {type(exc).__name__}: {exc}")

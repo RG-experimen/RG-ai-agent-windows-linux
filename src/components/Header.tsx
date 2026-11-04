@@ -90,6 +90,16 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Status Indicator & Drawer Toggle */}
           <div className="flex items-center gap-2.5">
+            <a
+              href="/multi-provider-ai-agent.zip"
+              download="multi-provider-ai-agent.zip"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white transition-colors shadow-sm"
+              title="Unduh semua berkas dalam paket ZIP"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Unduh ZIP</span>
+            </a>
+
             {onToggleDrawer && (
               <button
                 onClick={onToggleDrawer}

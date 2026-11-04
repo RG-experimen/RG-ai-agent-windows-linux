@@ -54,6 +54,15 @@ async function startServer() {
     res.json({ filename, content });
   });
 
+  // API: Download complete agent package as zip
+  app.get('/api/download/zip', (req: Request, res: Response) => {
+    const zipPath = path.join(__dirname, 'public', 'multi-provider-ai-agent.zip');
+    if (!fs.existsSync(zipPath)) {
+      return res.status(404).json({ error: 'Zip file not found' });
+    }
+    res.download(zipPath, 'multi-provider-ai-agent.zip');
+  });
+
   // API: Live Gemini Agent Query (Server-side Gemini proxy using @google/genai)
   app.post('/api/agent/chat', async (req: Request, res: Response) => {
     try {

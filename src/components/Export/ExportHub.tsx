@@ -70,17 +70,57 @@ export const ExportHub: React.FC = () => {
               </h1>
             </div>
             <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-              Unduh seluruh berkas aplikasi yang telah diperbaiki, diuji, dan dioptimasi kinerjanya untuk dijalankan di Windows, Kali Linux, atau macOS.
+              Seluruh berkas aplikasi yang telah diperbaiki, diuji, dan dioptimasi telah dikemas ke dalam satu folder <code className="text-emerald-400 font-mono">multi-provider-ai-agent/</code> dan di-compress menjadi berkas ZIP siap unduh.
             </p>
           </div>
 
-          <button
-            onClick={() => handleDownload(selectedFile, fileContent)}
-            className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs sm:text-sm flex items-center gap-2 transition-colors shadow-sm shrink-0"
+          <div className="flex flex-wrap items-center gap-2.5">
+            <a
+              href="/multi-provider-ai-agent.zip"
+              download="multi-provider-ai-agent.zip"
+              className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs sm:text-sm flex items-center gap-2 transition-all shadow-md hover:shadow-emerald-500/20 shrink-0"
+            >
+              <FolderDown className="w-4 h-4" />
+              <span>Unduh Paket Lengkap (.ZIP)</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-700/60 text-emerald-100">
+                26 KB
+              </span>
+            </a>
+
+            <button
+              onClick={() => handleDownload(selectedFile, fileContent)}
+              className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium text-xs sm:text-sm flex items-center gap-2 transition-colors border border-zinc-700 shrink-0"
+            >
+              <Download className="w-4 h-4" />
+              <span>Unduh {selectedFile}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Zip Content Summary Banner */}
+        <div className="bg-emerald-950/20 border border-emerald-900/40 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 shrink-0">
+              <FolderDown className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="font-semibold text-emerald-300">
+                Arsip ZIP: multi-provider-ai-agent.zip (6 Berkas Utama)
+              </div>
+              <div className="text-zinc-400 text-[11px] mt-0.5 font-mono">
+                multi-provider-ai-agent/ [ agent.py · requirements.txt · run.sh · run.bat · README.md · .env.example ]
+              </div>
+            </div>
+          </div>
+
+          <a
+            href="/api/download/zip"
+            download="multi-provider-ai-agent.zip"
+            className="text-xs text-emerald-400 hover:text-emerald-300 underline underline-offset-4 flex items-center gap-1 shrink-0 font-medium"
           >
-            <Download className="w-4 h-4" />
-            <span>Unduh {selectedFile}</span>
-          </button>
+            <span>Direct Mirror Link</span>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
         </div>
 
         {/* Quick OS Instructions Cards */}
