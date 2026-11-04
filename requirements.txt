@@ -1,0 +1,18 @@
+# =============================================================================
+# Multi-Provider AI Agent — Dependencies
+# =============================================================================
+
+# Core AI Providers (Install all or just your preferred provider)
+google-genai>=1.0.0
+openai>=1.12.0
+anthropic>=0.18.0
+
+# Windows Mode / Desktop Automation (Required for --windows mode)
+pyautogui>=0.9.54
+pygetwindow>=0.0.9; sys_platform == 'win32'
+pyperclip>=1.8.2
+pillow>=10.2.0
+
+# GUI Framework:
+# - Windows & macOS: Tkinter is included with official Python installer.
+# - Linux (Ubuntu/Debian/Kali): sudo apt install python3-tk scrot

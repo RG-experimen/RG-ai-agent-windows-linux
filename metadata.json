@@ -1,0 +1,6 @@
+{
+  "name": "Multi-Provider AI Agent Studio & Optimizer",
+  "description": "Ready-to-use Multi-Provider AI Agent (Coding, Kali Hacking, Windows Automation) with bug fixes, performance optimizations, and interactive testbench.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
